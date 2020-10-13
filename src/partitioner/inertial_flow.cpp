@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <execution>
 #include <iterator>
 #include <mutex>
 #include <set>
@@ -15,7 +16,6 @@
 #include <vector>
 
 #include <tbb/blocked_range.h>
-#include <tbb/parallel_for.h>
 
 namespace osrm
 {
@@ -122,34 +122,33 @@ DinicMaxFlow::MinCut bestMinCut(const BisectionGraphView &view,
         return std::abs(difference);
     };
 
-    tbb::parallel_for(range, [&](const auto &chunk) {
-        for (auto round = chunk.begin(), end = chunk.end(); round != end; ++round)
+    std::vector<size_t> viktor{n};
+
+    std::for_each(std::execution::par, viktor.begin(), viktor.end(), [&](size_t &index) {
+        const auto slope = -1. + index * (2. / n);
+        auto order = makeSpatialOrder(view, ratio, slope);
+        auto cut = DinicMaxFlow()(view, order.sources, order.sinks);
+
+        auto cut_balance = get_balance(cut.num_nodes_source);
+
         {
-            const auto slope = -1. + round * (2. / n);
+            std::lock_guard<std::mutex> guard{lock};
 
-            auto order = makeSpatialOrder(view, ratio, slope);
-            auto cut = DinicMaxFlow()(view, order.sources, order.sinks);
-            auto cut_balance = get_balance(cut.num_nodes_source);
-
+            // Swap to keep the destruction of the old object outside of critical section.
+            if (cut.num_edges * cut_balance < best.num_edges * best_balance ||
+                (cut.num_edges == best.num_edges &&
+                 balance_delta(cut.num_nodes_source) < balance_delta(best.num_nodes_source)))
             {
-                std::lock_guard<std::mutex> guard{lock};
-
-                // Swap to keep the destruction of the old object outside of critical section.
-                if (cut.num_edges * cut_balance < best.num_edges * best_balance ||
-                    (cut.num_edges == best.num_edges &&
-                     balance_delta(cut.num_nodes_source) < balance_delta(best.num_nodes_source)))
-                {
-                    best_balance = cut_balance;
-                    std::swap(best, cut);
-                }
+                best_balance = cut_balance;
+                std::swap(best, cut);
             }
-            // cut gets destroyed here
         }
+        // cut gets destroyed here
     });
 
     return best;
-}
-}
+} // namespace
+} // namespace
 
 DinicMaxFlow::MinCut computeInertialFlowCut(const BisectionGraphView &view,
                                             const std::size_t num_slopes,

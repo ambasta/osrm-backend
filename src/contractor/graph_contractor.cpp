@@ -14,11 +14,11 @@
 
 #include <tbb/blocked_range.h>
 #include <tbb/enumerable_thread_specific.h>
-#include <tbb/parallel_for.h>
 #include <tbb/parallel_invoke.h>
 #include <tbb/parallel_sort.h>
 
 #include <algorithm>
+#include <execution>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -560,7 +560,7 @@ bool IsNodeIndependent(const util::XORFastHash<> &hash,
     }
     return true;
 }
-}
+} // namespace
 
 std::vector<bool> contractGraph(ContractorGraph &graph,
                                 std::vector<bool> node_is_uncontracted_,
@@ -620,18 +620,15 @@ std::vector<bool> contractGraph(ContractorGraph &graph,
     {
         util::UnbufferedLog log;
         log << "initializing node priorities...";
-        tbb::parallel_for(tbb::blocked_range<std::size_t>(0, remaining_nodes.size(), PQGrainSize),
-                          [&](const auto &range) {
-                              ContractorThreadData *data = thread_data_list.GetThreadData();
-                              for (auto x = range.begin(), end = range.end(); x != end; ++x)
-                              {
-                                  auto node = remaining_nodes[x].id;
-                                  BOOST_ASSERT(node_data.contractable[node]);
-                                  node_data.priorities[node] = EvaluateNodePriority(
-                                      SimulateNodeContraction(data, graph, node, node_data.weights),
-                                      node_data.depths[node]);
-                              }
-                          });
+        std::for_each_n(
+            std::execution::par, remaining_nodes.begin(), PQGrainSize, [&](const auto &node) {
+                ContractorThreadData *data = thread_data_list.GetThreadData();
+                auto node_id = node.id;
+                BOOST_ASSERT(node_data.contractable[node_id]);
+                node_data.priorities[node_id] = EvaluateNodePriority(
+                    SimulateNodeContraction(data, graph, node_id, node_data.weights),
+                    node_data.depths[node_id]);
+            });
         log << " ok.";
     }
 
@@ -657,17 +654,12 @@ std::vector<bool> contractGraph(ContractorGraph &graph,
             next_renumbering = 0;
         }
 
-        tbb::parallel_for(
-            tbb::blocked_range<NodeID>(0, remaining_nodes.size(), IndependentGrainSize),
-            [&](const auto &range) {
+        std::for_each_n(
+            std::execution::par, remaining_nodes.begin(), IndependentGrainSize, [&](auto &node) {
                 ContractorThreadData *data = thread_data_list.GetThreadData();
-                // determine independent node set
-                for (auto i = range.begin(), end = range.end(); i != end; ++i)
-                {
-                    const NodeID node = remaining_nodes[i].id;
-                    remaining_nodes[i].is_independent = IsNodeIndependent(
-                        hash, node_data.priorities, new_to_old_node_id, graph, data, node);
-                }
+                const NodeID node_id = node.id;
+                node.is_independent = IsNodeIndependent(
+                    hash, node_data.priorities, new_to_old_node_id, graph, data, node_id);
             });
 
         // sort all remaining nodes to the beginning of the sequence
@@ -680,43 +672,39 @@ std::vector<bool> contractGraph(ContractorGraph &graph,
         auto end_independent_nodes_idx = remaining_nodes.size();
 
         // contract independent nodes
-        tbb::parallel_for(
-            tbb::blocked_range<NodeID>(
-                begin_independent_nodes_idx, end_independent_nodes_idx, ContractGrainSize),
-            [&](const auto &range) {
-                ContractorThreadData *data = thread_data_list.GetThreadData();
-                for (auto position = range.begin(), end = range.end(); position != end; ++position)
-                {
-                    const NodeID node = remaining_nodes[position].id;
-                    ContractNode(data, graph, node, node_data.weights);
-                }
-            });
+
+        std::for_each_n(std::execution::par,
+                        remaining_nodes.begin() + begin_independent_nodes_idx,
+                        ContractGrainSize,
+                        [&](const auto &node) {
+                            ContractorThreadData *data = thread_data_list.GetThreadData();
+                            const NodeID node_id = node.id;
+                            ContractNode(data, graph, node_id, node_data.weights);
+                        });
 
         // core flags need to be set in serial since vector<bool> is not thread safe
-        for (auto position :
-             util::irange<std::size_t>(begin_independent_nodes_idx, end_independent_nodes_idx))
-        {
-            node_data.is_core[remaining_nodes[position].id] = false;
-        }
+        std::for_each(std::execution::seq,
+                      remaining_nodes.begin() + begin_independent_nodes_idx,
+                      remaining_nodes.end(),
+                      [&](auto &node) { node_data.is_core[node.id] = false; });
 
-        tbb::parallel_for(
-            tbb::blocked_range<NodeID>(
-                begin_independent_nodes_idx, end_independent_nodes_idx, DeleteGrainSize),
-            [&](const auto &range) {
-                ContractorThreadData *data = thread_data_list.GetThreadData();
-                for (auto position = range.begin(), end = range.end(); position != end; ++position)
-                {
-                    const NodeID node = remaining_nodes[position].id;
-                    DeleteIncomingEdges(data, graph, node);
-                }
-            });
-
+        std::for_each_n(std::execution::par,
+                        remaining_nodes.begin() + begin_independent_nodes_idx,
+                        DeleteGrainSize,
+                        [&](auto &node) {
+                            ContractorThreadData *data = thread_data_list.GetThreadData();
+                            DeleteIncomingEdges(data, graph, node.id);
+                        });
         // make sure we really sort each block
-        tbb::parallel_for(thread_data_list.data.range(), [&](const auto &range) {
-            for (auto &data : range)
-                tbb::parallel_sort(data->inserted_edges.begin(), data->inserted_edges.end());
-        });
-
+        std::for_each(std::execution::par,
+                      thread_data_list.data.begin(),
+                      thread_data_list.data.end(),
+                      [&](const auto &iter) {
+                          auto thread_data = *thread_data_list.data.begin();
+                          std::sort(std::execution::par,
+                                    iter->inserted_edges.begin(),
+                                    iter->inserted_edges.end());
+                      });
         // insert new edges
         for (auto &data : thread_data_list.data)
         {
@@ -743,18 +731,13 @@ std::vector<bool> contractGraph(ContractorGraph &graph,
             data->inserted_edges.clear();
         }
 
-        tbb::parallel_for(
-            tbb::blocked_range<NodeID>(
-                begin_independent_nodes_idx, end_independent_nodes_idx, NeighboursGrainSize),
-            [&](const auto &range) {
-                ContractorThreadData *data = thread_data_list.GetThreadData();
-                for (auto position = range.begin(), end = range.end(); position != end; ++position)
-                {
-                    NodeID node = remaining_nodes[position].id;
-                    UpdateNodeNeighbours(node_data, data, graph, node);
-                }
-            });
-
+        std::for_each_n(std::execution::par,
+                        remaining_nodes.begin() + begin_independent_nodes_idx,
+                        NeighboursGrainSize,
+                        [&](const auto &node) {
+                            ContractorThreadData *data = thread_data_list.GetThreadData();
+                            UpdateNodeNeighbours(node_data, data, graph, node.id);
+                        });
         // remove contracted nodes from the pool
         BOOST_ASSERT(end_independent_nodes_idx - begin_independent_nodes_idx > 0);
         number_of_contracted_nodes += end_independent_nodes_idx - begin_independent_nodes_idx;

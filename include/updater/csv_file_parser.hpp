@@ -7,17 +7,19 @@
 #include "util/exception_utils.hpp"
 #include "util/log.hpp"
 
-#include <tbb/parallel_for.h>
 #include <tbb/parallel_sort.h>
 #include <tbb/spin_mutex.h>
 
 #include <boost/exception/diagnostic_information.hpp>
-#include <boost/filesystem.hpp>
 #include <boost/iostreams/device/mapped_file.hpp>
 #include <boost/spirit/include/phoenix.hpp>
 #include <boost/spirit/include/qi.hpp>
+#include <filesystem>
 
+#include <algorithm>
 #include <exception>
+#include <execution>
+#include <ranges>
 #include <stdexcept>
 #include <vector>
 
@@ -48,18 +50,18 @@ template <typename Key, typename Value> struct CSVFilesParser
         {
             tbb::spin_mutex mutex;
             std::vector<std::pair<Key, Value>> lookup;
-            tbb::parallel_for(std::size_t{0},
-                              csv_filenames.size(),
-                              [&](const std::size_t idx) {
-                                  auto local = ParseCSVFile(csv_filenames[idx], start_index + idx);
+            std::vector<size_t> range{csv_filenames.size()};
+            std::iota(range.begin(), range.end(), 0);
+            std::for_each(std::execution::par, range.begin(), range.end(), [&](const size_t idx) {
+                auto local = ParseCSVFile(csv_filenames[idx], start_index + idx);
 
-                                  { // Merge local CSV results into a flat global vector
-                                      tbb::spin_mutex::scoped_lock _{mutex};
-                                      lookup.insert(end(lookup),
-                                                    std::make_move_iterator(begin(local)),
-                                                    std::make_move_iterator(end(local)));
-                                  }
-                              });
+                { // Merge local CSV results into a flat global vector
+                    tbb::spin_mutex::scoped_lock _{mutex};
+                    lookup.insert(end(lookup),
+                                  std::make_move_iterator(begin(local)),
+                                  std::make_move_iterator(end(local)));
+                }
+            });
 
             // With flattened map-ish view of all the files, make a stable sort on key and source
             // and unique them on key to keep only the value with the largest file index
@@ -99,7 +101,7 @@ template <typename Key, typename Value> struct CSVFilesParser
         std::vector<std::pair<Key, Value>> result;
         try
         {
-            if (boost::filesystem::file_size(filename) == 0)
+            if (std::filesystem::file_size(filename) == 0)
                 return result;
 
             boost::iostreams::mapped_file_source mmap(filename);
@@ -140,7 +142,7 @@ template <typename Key, typename Value> struct CSVFilesParser
     const KeyRule key_rule;
     const ValueRule value_rule;
 };
-}
-}
+} // namespace updater
+} // namespace osrm
 
 #endif

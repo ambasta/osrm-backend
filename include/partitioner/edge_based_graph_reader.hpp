@@ -11,12 +11,12 @@
 #include "util/typedefs.hpp"
 
 #include <tbb/blocked_range.h>
-#include <tbb/parallel_for.h>
 #include <tbb/parallel_reduce.h>
 
 #include <cstdint>
 
 #include <algorithm>
+#include <execution>
 #include <iterator>
 #include <memory>
 #include <vector>
@@ -143,49 +143,47 @@ inline std::vector<extractor::EdgeBasedEdge>
 graphToEdges(const DynamicEdgeBasedGraph &edge_based_graph)
 {
     auto range = tbb::blocked_range<NodeID>(0, edge_based_graph.GetNumberOfNodes());
-    auto max_turn_id =
-        tbb::parallel_reduce(range,
-                             NodeID{0},
-                             [&edge_based_graph](const auto range, NodeID initial) {
-                                 NodeID max_turn_id = initial;
-                                 for (auto node = range.begin(); node < range.end(); ++node)
-                                 {
-                                     for (auto edge : edge_based_graph.GetAdjacentEdgeRange(node))
-                                     {
-                                         const auto &data = edge_based_graph.GetEdgeData(edge);
-                                         max_turn_id = std::max(max_turn_id, data.turn_id);
-                                     }
-                                 }
-                                 return max_turn_id;
-                             },
-                             [](const NodeID lhs, const NodeID rhs) { return std::max(lhs, rhs); });
+    auto max_turn_id = tbb::parallel_reduce(
+        range,
+        NodeID{0},
+        [&edge_based_graph](const auto range, NodeID initial) {
+            NodeID max_turn_id = initial;
+            for (auto node = range.begin(); node < range.end(); ++node)
+            {
+                for (auto edge : edge_based_graph.GetAdjacentEdgeRange(node))
+                {
+                    const auto &data = edge_based_graph.GetEdgeData(edge);
+                    max_turn_id = std::max(max_turn_id, data.turn_id);
+                }
+            }
+            return max_turn_id;
+        },
+        [](const NodeID lhs, const NodeID rhs) { return std::max(lhs, rhs); });
 
     std::vector<extractor::EdgeBasedEdge> edges(max_turn_id + 1);
-    tbb::parallel_for(range, [&](const auto range) {
-        for (auto node = range.begin(); node < range.end(); ++node)
+    std::vector<NodeID> tbbIndexRange{edge_based_graph.GetNumberOfNodes()};
+    std::iota(tbbIndexRange.begin(), tbbIndexRange.end(), 0);
+    std::for_each(std::execution::par, tbbIndexRange.begin(), tbbIndexRange.end(), [&](const NodeID &node_id) {
+        for (auto edge : edge_based_graph.GetAdjacentEdgeRange(node_id))
         {
-            for (auto edge : edge_based_graph.GetAdjacentEdgeRange(node))
+            const auto &data = edge_based_graph.GetEdgeData(edge);
+            // we only need to save the forward edges, since the read method will
+            // convert from forward to bi-directional edges again
+            if (data.forward)
             {
-                const auto &data = edge_based_graph.GetEdgeData(edge);
-                // we only need to save the forward edges, since the read method will
-                // convert from forward to bi-directional edges again
-                if (data.forward)
-                {
-                    auto target = edge_based_graph.GetTarget(edge);
-                    BOOST_ASSERT(data.turn_id <= max_turn_id);
-                    edges[data.turn_id] = extractor::EdgeBasedEdge{node, target, data};
-                    // only save the forward edge
-                    edges[data.turn_id].data.forward = true;
-                    edges[data.turn_id].data.backward = false;
-                }
+                auto target = edge_based_graph.GetTarget(edge);
+                BOOST_ASSERT(data.turn_id <= max_turn_id);
+                edges[data.turn_id] = extractor::EdgeBasedEdge{node_id, target, data};
+                // only save the forward edge
+                edges[data.turn_id].data.forward = true;
+                edges[data.turn_id].data.backward = false;
             }
         }
     });
-
     return edges;
 }
 
-inline DynamicEdgeBasedGraph LoadEdgeBasedGraph(const boost::filesystem::path &path)
+inline DynamicEdgeBasedGraph LoadEdgeBasedGraph(const std::filesystem::path &path)
 {
     EdgeID number_of_edge_based_nodes;
     std::vector<extractor::EdgeBasedEdge> edges;
@@ -198,7 +196,7 @@ inline DynamicEdgeBasedGraph LoadEdgeBasedGraph(const boost::filesystem::path &p
     return DynamicEdgeBasedGraph(number_of_edge_based_nodes, std::move(tidied), checksum);
 }
 
-} // ns partition
-} // ns osrm
+} // namespace partitioner
+} // namespace osrm
 
 #endif

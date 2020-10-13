@@ -7,11 +7,9 @@
 
 #include "storage/shared_memory_ownership.hpp"
 #include "storage/tar_fwd.hpp"
-
+#include <tbb/atomic.h>
 #include <boost/iterator/iterator_facade.hpp>
 #include <boost/iterator/reverse_iterator.hpp>
-
-#include <tbb/atomic.h>
 
 #include <array>
 #include <cmath>

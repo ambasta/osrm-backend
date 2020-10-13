@@ -28,7 +28,6 @@
 #include "util/typedefs.hpp"
 
 #include <boost/assert.hpp>
-#include <boost/filesystem/fstream.hpp>
 #include <boost/geometry.hpp>
 #include <boost/geometry/index/rtree.hpp>
 #include <boost/interprocess/file_mapping.hpp>
@@ -37,7 +36,6 @@
 #include <tbb/blocked_range.h>
 #include <tbb/concurrent_vector.h>
 #include <tbb/enumerable_thread_specific.h>
-#include <tbb/parallel_for.h>
 #include <tbb/parallel_invoke.h>
 #include <tbb/parallel_sort.h>
 
@@ -45,6 +43,8 @@
 #include <atomic>
 #include <bitset>
 #include <cstdint>
+#include <execution>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -69,7 +69,7 @@ template <typename T1, typename T2> struct hash<std::tuple<T1, T2>>
         return hash_val(std::get<0>(t), std::get<1>(t));
     }
 };
-}
+} // namespace std
 
 namespace osrm
 {
@@ -162,9 +162,10 @@ updateSegmentData(const UpdaterConfig &config,
 
     // closure to convert SpeedSource value to weight and count fallbacks to durations
     std::atomic<std::uint32_t> fallbacks_to_duration{0};
-    auto convertToWeight = [&profile_properties, &fallbacks_to_duration](
-        const SegmentWeight &existing_weight, const SpeedSource &value, double distance_in_meters) {
-
+    auto convertToWeight = [&profile_properties,
+                            &fallbacks_to_duration](const SegmentWeight &existing_weight,
+                                                    const SpeedSource &value,
+                                                    double distance_in_meters) {
         double rate = std::numeric_limits<double>::quiet_NaN();
 
         // if value.rate is not set, we fall back to duration
@@ -214,14 +215,16 @@ updateSegmentData(const UpdaterConfig &config,
     tbb::concurrent_vector<GeometryID> updated_segments;
 
     using DirectionalGeometryID = extractor::SegmentDataContainer::DirectionalGeometryID;
-    auto range = tbb::blocked_range<DirectionalGeometryID>(0, segment_data.GetNumberOfGeometries());
-    tbb::parallel_for(range, [&](const auto &range) {
-        auto &counters = segment_speeds_counters.local();
-        std::vector<double> segment_lengths;
-        for (auto geometry_id = range.begin(); geometry_id < range.end(); geometry_id++)
-        {
-            auto nodes_range = segment_data.GetForwardGeometry(geometry_id);
+    // auto range = tbb::blocked_range<DirectionalGeometryID>(0,
+    // segment_data.GetNumberOfGeometries());
+    std::vector<DirectionalGeometryID> range{(unsigned int)segment_data.GetNumberOfGeometries()};
+    std::iota(range.begin(), range.end(), 0);
 
+    std::for_each(
+        std::execution::par, range.begin(), range.end(), [&](DirectionalGeometryID &geometry_id) {
+            auto &counters = segment_speeds_counters.local();
+            std::vector<double> segment_lengths;
+            auto nodes_range = segment_data.GetForwardGeometry(geometry_id);
             segment_lengths.clear();
             segment_lengths.reserve(nodes_range.size() + 1);
             util::for_each_pair(nodes_range, [&](const auto &u, const auto &v) {
@@ -303,8 +306,7 @@ updateSegmentData(const UpdaterConfig &config,
             }
             if (rev_was_updated)
                 updated_segments.push_back(GeometryID{geometry_id, false});
-        }
-    }); // parallel_for
+        }); // parallel_for
 
     counters_type merged_counters(num_counters, 0);
     for (const auto &counters : segment_speeds_counters)
@@ -401,7 +403,7 @@ updateSegmentData(const UpdaterConfig &config,
     }
 
     return updated_segments;
-}
+} // namespace
 
 void saveDatasourcesNames(const UpdaterConfig &config)
 {
@@ -415,7 +417,7 @@ void saveDatasourcesNames(const UpdaterConfig &config)
     // for rendering in the debug tiles.
     for (auto const &name : config.segment_speed_lookup_paths)
     {
-        sources.SetSourceName(source, boost::filesystem::path(name).stem().string());
+        sources.SetSourceName(source, std::filesystem::path(name).stem().string());
         source++;
     }
 
@@ -523,7 +525,7 @@ updateConditionalTurns(std::vector<TurnPenalty> &turn_weight_penalties,
     }
     return updated_turns;
 }
-}
+} // namespace
 
 EdgeID
 Updater::LoadAndUpdateEdgeExpandedGraph(std::vector<extractor::EdgeBasedEdge> &edge_based_edge_list,
@@ -715,14 +717,16 @@ Updater::LoadAndUpdateEdgeExpandedGraph(std::vector<extractor::EdgeBasedEdge> &e
     };
 
     std::vector<WeightAndDuration> accumulated_segment_data(updated_segments.size());
-    tbb::parallel_for(tbb::blocked_range<std::size_t>(0, updated_segments.size()),
-                      [&](const auto &range) {
-                          for (auto index = range.begin(); index < range.end(); ++index)
-                          {
-                              accumulated_segment_data[index] =
-                                  compute_new_weight_and_duration(updated_segments[index]);
-                          }
-                      });
+    std::vector<std::size_t> updated_segments_range{updated_segments.size()};
+    std::iota(updated_segments_range.begin(), updated_segments_range.end(), 0);
+
+    std::for_each(std::execution::par,
+                  updated_segments_range.begin(),
+                  updated_segments_range.end(),
+                  [&](const size_t &index) {
+                      accumulated_segment_data[index] =
+                          compute_new_weight_and_duration(updated_segments[index]);
+                  });
 
     const auto update_edge = [&](extractor::EdgeBasedEdge &edge) {
         const auto node_id = edge.source;
@@ -770,9 +774,9 @@ Updater::LoadAndUpdateEdgeExpandedGraph(std::vector<extractor::EdgeBasedEdge> &e
             {
                 if (turn_weight_penalty < 0)
                 {
-                    util::Log(logWARNING) << "turn penalty " << turn_weight_penalty
-                                          << " is too negative: clamping turn weight to "
-                                          << weight_min_value;
+                    util::Log(logWARNING)
+                        << "turn penalty " << turn_weight_penalty
+                        << " is too negative: clamping turn weight to " << weight_min_value;
                     turn_weight_penalty = weight_min_value - new_weight;
                     turn_weight_penalties[edge.data.turn_id] = turn_weight_penalty;
                 }
@@ -790,13 +794,10 @@ Updater::LoadAndUpdateEdgeExpandedGraph(std::vector<extractor::EdgeBasedEdge> &e
 
     if (updated_segments.size() > 0)
     {
-        tbb::parallel_for(tbb::blocked_range<std::size_t>(0, edge_based_edge_list.size()),
-                          [&](const auto &range) {
-                              for (auto index = range.begin(); index < range.end(); ++index)
-                              {
-                                  update_edge(edge_based_edge_list[index]);
-                              }
-                          });
+        std::for_each(std::execution::par,
+                      edge_based_edge_list.begin(),
+                      edge_based_edge_list.end(),
+                      [&](auto &edge_list) { update_edge(edge_list); });
     }
 
     if (update_turn_penalties || update_conditional_turns)
@@ -826,5 +827,5 @@ Updater::LoadAndUpdateEdgeExpandedGraph(std::vector<extractor::EdgeBasedEdge> &e
     util::Log() << "Done reading edges in " << TIMER_MSEC(load_edges) << "ms.";
     return number_of_edge_based_nodes;
 }
-}
-}
+} // namespace updater
+} // namespace osrm

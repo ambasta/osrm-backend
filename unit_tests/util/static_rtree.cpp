@@ -17,6 +17,7 @@
 #include <cstdint>
 
 #include <algorithm>
+#include <filesystem>
 #include <memory>
 #include <random>
 #include <string>
@@ -250,7 +251,7 @@ void sampling_verify_rtree(RTreeT &rtree,
 }
 
 template <typename RTreeT, typename FixtureT>
-auto make_rtree(const boost::filesystem::path &path, FixtureT &fixture)
+auto make_rtree(const std::filesystem::path &path, FixtureT &fixture)
 {
     return RTreeT(fixture.edges, fixture.coords, path);
 }

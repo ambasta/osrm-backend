@@ -60,7 +60,7 @@ struct unsafelatitude
 struct unsafelongitude
 {
 };
-}
+} // namespace tag
 
 // Internal lon/lat types - assumed to be range safe
 using FixedLatitude = Alias<std::int32_t, tag::latitude>;
@@ -71,12 +71,12 @@ using FloatLongitude = Alias<double, tag::longitude>;
 // range checks on these (toFixed/toFloat, etc)
 using UnsafeFloatLatitude = Alias<double, tag::unsafelatitude>;
 using UnsafeFloatLongitude = Alias<double, tag::unsafelongitude>;
-static_assert(std::is_pod<FixedLatitude>(), "FixedLatitude is not a valid alias");
-static_assert(std::is_pod<FixedLongitude>(), "FixedLongitude is not a valid alias");
-static_assert(std::is_pod<FloatLatitude>(), "FloatLatitude is not a valid alias");
-static_assert(std::is_pod<FloatLongitude>(), "FloatLongitude is not a valid alias");
-static_assert(std::is_pod<UnsafeFloatLatitude>(), "UnsafeFloatLatitude is not a valid alias");
-static_assert(std::is_pod<UnsafeFloatLongitude>(), "UnsafeFloatLongitude is not a valid alias");
+static_assert(std::is_trivial<FixedLatitude>(), "FixedLatitude is not a valid alias");
+static_assert(std::is_trivial<FixedLongitude>(), "FixedLongitude is not a valid alias");
+static_assert(std::is_trivial<FloatLatitude>(), "FloatLatitude is not a valid alias");
+static_assert(std::is_trivial<FloatLongitude>(), "FloatLongitude is not a valid alias");
+static_assert(std::is_trivial<UnsafeFloatLatitude>(), "UnsafeFloatLatitude is not a valid alias");
+static_assert(std::is_trivial<UnsafeFloatLongitude>(), "UnsafeFloatLongitude is not a valid alias");
 
 /**
  * Converts a typed latitude from floating to fixed representation.
@@ -265,7 +265,7 @@ inline Coordinate::Coordinate(const FloatCoordinate &other)
     : Coordinate(toFixed(other.lon), toFixed(other.lat))
 {
 }
-}
-}
+} // namespace util
+} // namespace osrm
 
 #endif /* COORDINATE_HPP_ */

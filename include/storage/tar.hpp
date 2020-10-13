@@ -7,7 +7,7 @@
 #include "util/integer_range.hpp"
 #include "util/version.hpp"
 
-#include <boost/filesystem/path.hpp>
+#include <filesystem>
 
 extern "C" {
 #include "microtar.h"
@@ -22,7 +22,7 @@ namespace tar
 namespace detail
 {
 inline void
-checkMTarError(int error_code, const boost::filesystem::path &filepath, const std::string &name)
+checkMTarError(int error_code, const std::filesystem::path &filepath, const std::string &name)
 {
     switch (error_code)
     {
@@ -81,7 +81,7 @@ class FileReader
         HasNoFingerprint
     };
 
-    FileReader(const boost::filesystem::path &path, FingerprintFlag flag) : path(path)
+    FileReader(const std::filesystem::path &path, FingerprintFlag flag) : path(path)
     {
         auto ret = mtar_open(&handle, path.string().c_str(), "r");
         detail::checkMTarError(ret, path, "");
@@ -207,7 +207,7 @@ class FileReader
         return true;
     }
 
-    boost::filesystem::path path;
+    std::filesystem::path path;
     mtar_t handle;
 };
 
@@ -220,7 +220,7 @@ class FileWriter
         HasNoFingerprint
     };
 
-    FileWriter(const boost::filesystem::path &path, FingerprintFlag flag) : path(path)
+    FileWriter(const std::filesystem::path &path, FingerprintFlag flag) : path(path)
     {
         auto ret = mtar_open(&handle, path.string().c_str(), "w");
         detail::checkMTarError(ret, path, "");
@@ -308,7 +308,7 @@ class FileWriter
         WriteFrom("osrm_fingerprint.meta", fingerprint);
     }
 
-    boost::filesystem::path path;
+    std::filesystem::path path;
     mtar_t handle;
 };
 }

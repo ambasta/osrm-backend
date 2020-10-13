@@ -89,8 +89,6 @@ static int write_null_bytes(mtar_t *tar, int n) {
 
 static int raw_to_header(mtar_header_t *h, const mtar_raw_header_t *rh) {
   unsigned chksum1, chksum2;
-  mtar_size_t filesize;
-
   /* If the checksum starts with a null byte we assume the record is NULL */
   if (*rh->checksum == '\0') {
     return MTAR_ENULLRECORD;

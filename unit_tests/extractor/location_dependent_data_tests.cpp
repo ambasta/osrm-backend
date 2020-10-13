@@ -2,9 +2,10 @@
 
 #include "../common/range_tools.hpp"
 
-#include <boost/filesystem.hpp>
 #include <boost/test/unit_test.hpp>
 
+#include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <vector>
 
@@ -16,14 +17,14 @@ using point_t = LocationDependentData::point_t;
 
 struct LocationDataFixture
 {
-    LocationDataFixture(const std::string &json) : temporary_file(boost::filesystem::unique_path())
+    LocationDataFixture(const std::string &json) : temporary_file(std::tmpnam(nullptr))
     {
         std::ofstream file(temporary_file.string());
         file << json;
     }
     ~LocationDataFixture() { remove(temporary_file); }
 
-    boost::filesystem::path temporary_file;
+    std::filesystem::path temporary_file;
 };
 
 BOOST_AUTO_TEST_CASE(polygon_tests)

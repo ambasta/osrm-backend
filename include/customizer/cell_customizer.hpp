@@ -6,8 +6,9 @@
 #include "util/query_heap.hpp"
 
 #include <tbb/enumerable_thread_specific.h>
-#include <tbb/parallel_for.h>
 
+#include <algorithm>
+#include <execution>
 #include <unordered_set>
 
 namespace osrm
@@ -123,15 +124,13 @@ class CellCustomizer
 
         for (std::size_t level = 1; level < partition.GetNumberOfLevels(); ++level)
         {
-            tbb::parallel_for(tbb::blocked_range<std::size_t>(0, partition.GetNumberOfCells(level)),
-                              [&](const tbb::blocked_range<std::size_t> &range) {
-                                  auto &heap = heaps.local();
-                                  for (auto id = range.begin(), end = range.end(); id != end; ++id)
-                                  {
-                                      Customize(
-                                          graph, heap, cells, allowed_nodes, metric, level, id);
-                                  }
-                              });
+            std::vector<std::size_t> tbbrange{partition.GetNumberOfCells(level)};
+            std::iota(tbbrange.begin(), tbbrange.end(), 0);
+            std::for_each(
+                std::execution::par, tbbrange.begin(), tbbrange.end(), [&](const size_t &index) {
+                    auto &heap = heaps.local();
+                    Customize(graph, heap, cells, allowed_nodes, metric, level, index);
+                });
         }
     }
 
@@ -212,9 +211,8 @@ class CellCustomizer
             }
 
             const auto &data = graph.GetEdgeData(edge);
-            if (data.forward &&
-                (first_level ||
-                 partition.GetCell(level - 1, node) != partition.GetCell(level - 1, to)))
+            if (data.forward && (first_level || partition.GetCell(level - 1, node) !=
+                                                    partition.GetCell(level - 1, to)))
             {
                 const EdgeWeight to_weight = weight + data.weight;
                 const EdgeDuration to_duration = duration + data.duration;
@@ -237,7 +235,7 @@ class CellCustomizer
 
     const partitioner::MultiLevelPartition &partition;
 };
-}
-}
+} // namespace customizer
+} // namespace osrm
 
 #endif // OSRM_CELLS_CUSTOMIZER_HPP

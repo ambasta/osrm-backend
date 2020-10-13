@@ -20,16 +20,15 @@
 #include "storage/shared_memory_ownership.hpp"
 
 #include <boost/assert.hpp>
-#include <boost/filesystem.hpp>
 #include <boost/format.hpp>
 #include <boost/iostreams/device/mapped_file.hpp>
+#include <filesystem>
 
 #include <tbb/blocked_range.h>
-#include <tbb/parallel_for.h>
-#include <tbb/parallel_sort.h>
 
 #include <algorithm>
 #include <array>
+#include <execution>
 #include <limits>
 #include <memory>
 #include <queue>
@@ -64,7 +63,7 @@ inline void
 write(storage::tar::FileWriter &writer,
       const std::string &name,
       const util::StaticRTree<EdgeDataT, Ownership, BRANCHING_FACTOR, LEAF_PAGE_SIZE> &rtree);
-}
+} // namespace serialization
 
 /***
  * Static RTree for serving nearest neighbour queries
@@ -273,42 +272,39 @@ class StaticRTree
     // Construct a packed Hilbert-R-Tree with Kamel-Faloutsos algorithm [1]
     explicit StaticRTree(const std::vector<EdgeDataT> &input_data_vector,
                          const Vector<Coordinate> &coordinate_list,
-                         const boost::filesystem::path &on_disk_file_name)
+                         const std::filesystem::path &on_disk_file_name)
         : m_coordinate_list(coordinate_list.data(), coordinate_list.size())
     {
         const auto element_count = input_data_vector.size();
         std::vector<WrappedInputElement> input_wrapper_vector(element_count);
 
         // Step 1 - create a vector of Hilbert Code/original position pairs
-        tbb::parallel_for(
-            tbb::blocked_range<uint64_t>(0, element_count),
-            [&input_data_vector, &input_wrapper_vector, this](
-                const tbb::blocked_range<uint64_t> &range) {
-                for (uint64_t element_counter = range.begin(), end = range.end();
-                     element_counter != end;
-                     ++element_counter)
-                {
-                    WrappedInputElement &current_wrapper = input_wrapper_vector[element_counter];
-                    current_wrapper.m_original_index = element_counter;
+        std::vector<uint64_t> tbb_range{element_count};
+        std::iota(tbb_range.begin(), tbb_range.end(), 0);
+        std::for_each(
+            std::execution::par,
+            tbb_range.begin(),
+            tbb_range.end(),
+            [&input_data_vector, &input_wrapper_vector, this](const uint64_t &element_counter) {
+                WrappedInputElement &current_wrapper = input_wrapper_vector[element_counter];
+                current_wrapper.m_original_index = element_counter;
 
-                    EdgeDataT const &current_element = input_data_vector[element_counter];
+                EdgeDataT const &current_element = input_data_vector[element_counter];
 
-                    // Get Hilbert-Value for centroid in mercartor projection
-                    BOOST_ASSERT(current_element.u < m_coordinate_list.size());
-                    BOOST_ASSERT(current_element.v < m_coordinate_list.size());
+                // Get Hilbert-Value for centroid in mercartor projection
+                BOOST_ASSERT(current_element.u < m_coordinate_list.size());
+                BOOST_ASSERT(current_element.v < m_coordinate_list.size());
 
-                    Coordinate current_centroid = coordinate_calculation::centroid(
-                        m_coordinate_list[current_element.u], m_coordinate_list[current_element.v]);
-                    current_centroid.lat = FixedLatitude{static_cast<std::int32_t>(
-                        COORDINATE_PRECISION *
-                        web_mercator::latToY(toFloating(current_centroid.lat)))};
+                Coordinate current_centroid = coordinate_calculation::centroid(
+                    m_coordinate_list[current_element.u], m_coordinate_list[current_element.v]);
+                current_centroid.lat = FixedLatitude{static_cast<std::int32_t>(
+                    COORDINATE_PRECISION * web_mercator::latToY(toFloating(current_centroid.lat)))};
 
-                    current_wrapper.m_hilbert_value = GetHilbertCode(current_centroid);
-                }
+                current_wrapper.m_hilbert_value = GetHilbertCode(current_centroid);
             });
 
         // sort the hilbert-value representatives
-        tbb::parallel_sort(input_wrapper_vector.begin(), input_wrapper_vector.end());
+        std::sort(std::execution::par, input_wrapper_vector.begin(), input_wrapper_vector.end());
         {
             boost::iostreams::mapped_file out_objects_region;
             auto out_objects = mmapFile<EdgeDataT>(on_disk_file_name,
@@ -459,7 +455,7 @@ class StaticRTree
      * Constructs an empty RTree for de-serialization.
      */
     template <typename = std::enable_if<Ownership == storage::Ownership::Container>>
-    explicit StaticRTree(const boost::filesystem::path &on_disk_file_name,
+    explicit StaticRTree(const std::filesystem::path &on_disk_file_name,
                          const Vector<Coordinate> &coordinate_list)
         : m_coordinate_list(coordinate_list.data(), coordinate_list.size())
     {
@@ -474,7 +470,7 @@ class StaticRTree
      */
     explicit StaticRTree(Vector<TreeNode> search_tree_,
                          Vector<std::uint64_t> tree_level_starts,
-                         const boost::filesystem::path &on_disk_file_name,
+                         const std::filesystem::path &on_disk_file_name,
                          const Vector<Coordinate> &coordinate_list)
         : m_search_tree(std::move(search_tree_)),
           m_coordinate_list(coordinate_list.data(), coordinate_list.size()),
@@ -559,11 +555,12 @@ class StaticRTree
     std::vector<EdgeDataT> Nearest(const Coordinate input_coordinate,
                                    const std::size_t max_results) const
     {
-        return Nearest(input_coordinate,
-                       [](const CandidateSegment &) { return std::make_pair(true, true); },
-                       [max_results](const std::size_t num_results, const CandidateSegment &) {
-                           return num_results >= max_results;
-                       });
+        return Nearest(
+            input_coordinate,
+            [](const CandidateSegment &) { return std::make_pair(true, true); },
+            [max_results](const std::size_t num_results, const CandidateSegment &) {
+                return num_results >= max_results;
+            });
     }
 
     // Override filter and terminator for the desired behaviour.
@@ -773,7 +770,7 @@ class StaticRTree
 //[2] "Nearest Neighbor Queries", N. Roussopulos et al; 1995; DOI: 10.1145/223784.223794
 //[3] "Distance Browsing in Spatial Databases"; G. Hjaltason, H. Samet; 1999; ACM Trans. DB Sys
 // Vol.24 No.2, pp.265-318
-}
-}
+} // namespace util
+} // namespace osrm
 
 #endif // STATIC_RTREE_HPP

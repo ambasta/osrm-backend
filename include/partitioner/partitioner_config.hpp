@@ -1,10 +1,9 @@
 #ifndef OSRM_PARTITIONER_CONFIG_HPP
 #define OSRM_PARTITIONER_CONFIG_HPP
 
-#include <boost/filesystem/path.hpp>
-
 #include <array>
 #include <string>
+#include <filesystem>
 
 #include "storage/io_config.hpp"
 
@@ -31,7 +30,7 @@ struct PartitionerConfig final : storage::IOConfig
     {
     }
 
-    void UseDefaultOutputNames(const boost::filesystem::path &base)
+    void UseDefaultOutputNames(const std::filesystem::path &base)
     {
         IOConfig::UseDefaultOutputNames(base);
     }

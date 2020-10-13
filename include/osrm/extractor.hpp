@@ -43,7 +43,7 @@ struct ExtractorConfig;
  * \throws osrm::util::exception, osmium::io_error
  * \see Extractor, ExtractorConfig
  */
-void extract(const extractor::ExtractorConfig &config);
+void extract();
 
 } // ns osrm
 
