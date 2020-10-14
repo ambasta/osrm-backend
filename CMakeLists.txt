@@ -38,7 +38,6 @@ if(ENABLE_MASON)
   # versions in use
   set(MASON_BOOST_VERSION "1.65.1")
   set(MASON_EXPAT_VERSION "2.2.0")
-  set(MASON_LUA_VERSION "5.2.4")
   set(MASON_BZIP2_VERSION "1.0.6")
   set(MASON_TBB_VERSION "2017_U7")
 
@@ -363,7 +362,6 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Intel")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
   # using Visual Studio C++
   set(BOOST_COMPONENTS ${BOOST_COMPONENTS} zlib)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj") # avoid compiler error C1128 from scripting_environment_lua.cpp
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /DWIN32_LEAN_AND_MEAN") # avoid compiler error C2011 from dual #include of winsock.h and winsock2.h
   add_dependency_defines(-DBOOST_LIB_DIAGNOSTIC)
   add_dependency_defines(-D_CRT_SECURE_NO_WARNINGS)
@@ -396,12 +394,6 @@ set(OSRM_LDFLAGS "${OSRM_LDFLAGS} ${LINKER_FLAGS}")
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LINKER_FLAGS}")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${LINKER_FLAGS}")
 set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${LINKER_FLAGS}")
-
-# Activate C++1y
-if(NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
-  set(OSRM_CXXFLAGS "${OSRM_CXXFLAGS} -std=c++14")
-endif()
 
 # Configuring other platform dependencies
 if(APPLE)
@@ -484,10 +476,6 @@ if(ENABLE_MASON)
   add_dependency_includes(${MASON_PACKAGE_expat_INCLUDE_DIRS})
   set(EXPAT_LIBRARIES ${MASON_PACKAGE_expat_STATIC_LIBS})
 
-  mason_use(lua VERSION ${MASON_LUA_VERSION})
-  add_dependency_includes(${MASON_PACKAGE_lua_INCLUDE_DIRS})
-  set(USED_LUA_LIBRARIES ${MASON_PACKAGE_lua_STATIC_LIBS})
-
   mason_use(bzip2 VERSION ${MASON_BZIP2_VERSION})
   add_dependency_includes(${MASON_PACKAGE_bzip2_INCLUDE_DIRS})
   set(BZIP2_LIBRARIES ${MASON_PACKAGE_bzip2_STATIC_LIBS})
@@ -537,14 +525,6 @@ else()
 
   find_package(BZip2 REQUIRED)
   add_dependency_includes(${BZIP2_INCLUDE_DIR})
-
-  find_package(Lua 5.2 REQUIRED)
-  if (LUA_FOUND)
-    message(STATUS "Using Lua ${LUA_VERSION_STRING}")
-  endif()
-
-  set(USED_LUA_LIBRARIES ${LUA_LIBRARIES})
-  add_dependency_includes(${LUA_INCLUDE_DIR})
 
   # add a target to generate API documentation with Doxygen
   find_package(Doxygen)
@@ -624,7 +604,6 @@ set(EXTRACTOR_LIBRARIES
     ${BOOST_BASE_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
     ${EXPAT_LIBRARIES}
-    ${USED_LUA_LIBRARIES}
     ${OSMIUM_LIBRARIES}
     ${TBB_LIBRARIES}
     ${ZLIB_LIBRARY}
@@ -632,7 +611,6 @@ set(EXTRACTOR_LIBRARIES
 set(GUIDANCE_LIBRARIES
     ${BOOST_BASE_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
-    ${USED_LUA_LIBRARIES}
     ${TBB_LIBRARIES}
     ${MAYBE_COVERAGE_LIBRARIES})
 set(PARTITIONER_LIBRARIES
@@ -658,7 +636,6 @@ set(UPDATER_LIBRARIES
 set(CONTRACTOR_LIBRARIES
     ${BOOST_BASE_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
-    ${USED_LUA_LIBRARIES}
     ${TBB_LIBRARIES}
     ${MAYBE_RT_LIBRARY}
     ${MAYBE_COVERAGE_LIBRARIES})
